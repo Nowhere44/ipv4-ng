@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx'
 import { IPData } from './types'
 
-export function generateExampleFile(format: 'xlsx' | 'csv'): void {
+export function generateExampleFile(format: 'xlsx' | 'csv' | 'xml'): void {
     const data = [
         ['Site', 'IP'],
         ['Paris', ''],
@@ -10,26 +10,40 @@ export function generateExampleFile(format: 'xlsx' | 'csv'): void {
         ['', '192.168.3.0/24'],
         ['Lyon', ''],
         ['', '10.0.0.0/24'],
-        ['', '10.0.1.0/24']
-    ]
+        ['', '10.0.1.0/24'],
+    ];
 
     if (format === 'csv') {
-        const csvContent = data
-            .map(row => row.join(','))
-            .join('\n')
+        const csvContent = data.map((row) => row.join(',')).join('\n');
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'exemple-format.csv';
+        a.click();
+        window.URL.revokeObjectURL(url);
+    } else if (format === 'xml') {
+        let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<Example>\n';
+        data.slice(1).forEach((row) => {
+            xml += '  <Entry>\n';
+            xml += `    <Site>${row[0] || ''}</Site>\n`;
+            xml += `    <IP>${row[1] || ''}</IP>\n`;
+            xml += '  </Entry>\n';
+        });
+        xml += '</Example>';
 
-        const blob = new Blob([csvContent], { type: 'text/csv' })
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'exemple-format.csv'
-        a.click()
-        window.URL.revokeObjectURL(url)
+        const blob = new Blob([xml], { type: 'application/xml' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'exemple-format.xml';
+        a.click();
+        window.URL.revokeObjectURL(url);
     } else {
-        const ws = XLSX.utils.aoa_to_sheet(data)
-        const wb = XLSX.utils.book_new()
-        XLSX.utils.book_append_sheet(wb, ws, 'Example')
-        XLSX.writeFile(wb, 'exemple-format.xlsx')
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'Example');
+        XLSX.writeFile(wb, 'exemple-format.xlsx');
     }
 }
 

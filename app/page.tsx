@@ -14,6 +14,7 @@ import { useRouter } from 'next/navigation'
 import { Network } from 'lucide-react'
 import { VLANStandardization } from '@/components/vlan-standardization';
 import { VLANDocumentation } from '@/components/vlan-documentation';
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
 
 
 export default function Home() {
@@ -44,56 +45,71 @@ export default function Home() {
   }
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setError('')
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError('');
 
     try {
-      let rawData: Record<string, string>[] = []
+      let rawData: Record<string, string>[] = [];
 
       if (file.name.endsWith('.csv')) {
-        const text = await file.text()
-        const lines = text.split('\n')
-        rawData = lines.slice(1).map(line => {
-          const [site, ip] = line.split(',').map(val => val.trim())
-          return { Site: site, IP: ip }
-        })
+        const text = await file.text();
+        const lines = text.split('\n');
+        rawData = lines.slice(1).map((line) => {
+          const [site, ip] = line.split(',').map((val) => val.trim());
+          return { Site: site, IP: ip };
+        });
+      } else if (file.name.endsWith('.xml')) {
+        const text = await file.text();
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(text, 'application/xml');
+
+        rawData = [];
+        const entries = xmlDoc.getElementsByTagName('Entry');
+        for (let i = 0; i < entries.length; i++) {
+          const siteNode = entries[i].getElementsByTagName('Site')[0];
+          const ipNode = entries[i].getElementsByTagName('IP')[0];
+          const site = siteNode ? siteNode.textContent || '' : '';
+          const ip = ipNode ? ipNode.textContent || '' : '';
+          rawData.push({ Site: site, IP: ip });
+        }
       } else {
-        const data = await file.arrayBuffer()
-        const workbook = XLSX.read(data)
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-        rawData = XLSX.utils.sheet_to_json(worksheet)
+        const data = await file.arrayBuffer();
+        const workbook = XLSX.read(data);
+        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        rawData = XLSX.utils.sheet_to_json(worksheet);
       }
 
-      const processedData = parseFileData(rawData)
+      const processedData = parseFileData(rawData);
       const processedResults = await Promise.all(
         processedData.map(async (row) => {
           try {
-            if (!row.IP) return null
-            const ipResult = await processIPv4(row.IP)
-            return { ...ipResult, site: row.Site || 'Sans Site' }
+            if (!row.IP) return null;
+            const ipResult = await processIPv4(row.IP);
+            return { ...ipResult, site: row.Site || 'Sans Site' };
           } catch {
-            return null
+            return null;
           }
         })
-      )
+      );
 
-      const validResults = processedResults.filter((r): r is IPResult => r !== null)
-      setResults(validResults)
+      const validResults = processedResults.filter((r): r is IPResult => r !== null);
+      setResults(validResults);
 
       if (validResults.length === 0) {
-        setError('Aucune adresse IP valide trouvée dans le fichier')
+        setError('Aucune adresse IP valide trouvée dans le fichier');
       }
     } catch (error) {
       if (error instanceof Error) {
-        setError(error.message)
+        setError(error.message);
       } else {
-        setError("Erreur lors du traitement du fichier")
+        setError('Erreur lors du traitement du fichier');
       }
     }
 
-    e.target.value = ''
-  }
+    e.target.value = '';
+  };
+
 
   const groupResultsBySite = (results: IPResult[]): GroupedResults[] => {
     const groups = results.reduce((acc: { [key: string]: IPResult[] }, curr) => {
@@ -111,14 +127,44 @@ export default function Home() {
     }))
   }
 
-  const exportToExcel = () => {
-    if (!results.length) return
-    const ws = XLSX.utils.json_to_sheet(results)
-    const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, ws, 'Résultats')
-    XLSX.writeFile(wb, 'resultats-ip.xlsx')
-  }
+  const exportResults = (format: 'xlsx' | 'csv' | 'xml') => {
+    if (!results.length) return;
 
+    if (format === 'xlsx') {
+      const ws = XLSX.utils.json_to_sheet(results);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Résultats');
+      XLSX.writeFile(wb, 'resultats-ip.xlsx');
+    } else if (format === 'csv') {
+      const ws = XLSX.utils.json_to_sheet(results);
+      const csv = XLSX.utils.sheet_to_csv(ws);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = 'resultats-ip.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } else if (format === 'xml') {
+      let xml = '<?xml version="1.0" encoding="UTF-8"?>\n<Results>\n';
+      results.forEach((result) => {
+        xml += '  <Result>\n';
+        for (const [key, value] of Object.entries(result)) {
+          xml += `    <${key}>${value}</${key}>\n`;
+        }
+        xml += '  </Result>\n';
+      });
+      xml += '</Results>';
+
+      const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
+      const a = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      a.href = url;
+      a.download = 'resultats-ip.xml';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
   const resetResults = () => {
     setResults([])
     setError('')
@@ -131,7 +177,7 @@ export default function Home() {
       <div className="max-w-7xl mx-auto space-y-8">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-4xl font-bold text-gray-900">Calculateur IP, <span className='text-red-500'>By Omar Almoctar COULIBALY</span></h1>
+            <h1 className="text-4xl font-bold text-gray-900">Calculateur IP, <span className='text-gray-500 text-sm'>By Omar Almoctar COULIBALY, for </span> <span className='text-sm font-bold'>KEM ONE</span></h1>
             <p className="text-gray-500 mt-2">Analysez vos adresses IP et sous-réseaux</p>
           </div>
           <Button
@@ -149,7 +195,7 @@ export default function Home() {
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="single">IP Unique</TabsTrigger>
               <TabsTrigger value="bulk">Import Fichier</TabsTrigger>
-              <TabsTrigger value="vlans">Standardisation VLAN</TabsTrigger>
+              <TabsTrigger value="vlans">Standardisation VLAN <span className='text-gray-600 font-bold'> {" "} / KEM ONE</span></TabsTrigger>
             </TabsList>
 
             <TabsContent value="single">
@@ -170,23 +216,38 @@ export default function Home() {
                 <div className="flex flex-col gap-4">
                   <Input
                     type="file"
-                    accept=".xlsx,.xls,.csv"
+                    accept=".xlsx,.xls,.csv,.xml"
                     onChange={handleFileChange}
                     className="cursor-pointer"
                   />
                   <div className="flex items-center gap-2">
                     <p className="text-sm text-gray-500 flex-1">
-                      Formats acceptés : Excel (.xlsx, .xls), CSV (.csv)
+                      Formats acceptés : Excel (.xlsx, .xls), CSV (.csv), XML (.xml)
                     </p>
-                    <Button
-                      onClick={() => generateExampleFile('xlsx')}
-                      variant="outline"
-                      size="sm"
-                      className="whitespace-nowrap"
-                    >
-                      <FileDown className="w-4 h-4 mr-2" />
-                      Télécharger exemple
-                    </Button>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-gray-500 flex-1">
+                        Formats acceptés : Excel (.xlsx, .xls), CSV (.csv), XML (.xml)
+                      </p>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" className="whitespace-nowrap">
+                            <FileDown className="w-4 h-4 mr-2" />
+                            Télécharger exemple
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent>
+                          <DropdownMenuItem onClick={() => generateExampleFile('xlsx')}>
+                            Exemple Excel
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => generateExampleFile('csv')}>
+                            Exemple CSV
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => generateExampleFile('xml')}>
+                            Exemple XML
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -213,16 +274,31 @@ export default function Home() {
                     <RefreshCw className="w-4 h-4 mr-2" />
                     Réinitialiser
                   </Button>
-                  <Button onClick={exportToExcel} variant="outline" size="sm">
-                    <Download className="w-4 h-4 mr-2" />
-                    Exporter
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm">
+                        <Download className="w-4 h-4 mr-2" />
+                        Exporter
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent>
+                      <DropdownMenuItem onClick={() => exportResults('xlsx')}>
+                        Exporter en Excel
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => exportResults('csv')}>
+                        Exporter en CSV
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => exportResults('xml')}>
+                        Exporter en XML
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
 
               {groupedResults.map((group, groupIndex) => (
                 <div key={groupIndex} className="space-y-2">
-                  <h4 className="font-medium text-gray-700">{group.site}</h4>
+                  <h4 className="font-bold text-blue-500">{group.site}</h4>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">

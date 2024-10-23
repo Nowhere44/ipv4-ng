@@ -43,6 +43,10 @@ function decrementIP(ip: string): string {
     return octets.join('.');
 }
 
+function ipToInt(ip: string): number {
+    return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+}
+
 export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
     try {
         const address = new Address4(ipWithCidr);
@@ -50,55 +54,49 @@ export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
             throw new Error('Adresse IP invalide');
         }
 
-        // Parse l'IP et le CIDR
-        const [inputIP, cidrStr] = ipWithCidr.split('/');
+        const [inputIP, cidrStr] = ipWithCidr.split('/') || ipWithCidr.split(' /');
         const cidr = parseInt(cidrStr);
         const subnetMask = cidrToSubnetMask(cidr);
 
-        // Calcul des adresses du réseau
         const networkAddress = address.startAddress().address;
         const broadcastAddress = address.endAddress().address;
 
-        // Variables qui peuvent être modifiées
         let firstUsable = incrementIP(networkAddress);
         const lastUsable = decrementIP(broadcastAddress);
         let gateway = lastUsable;
 
-        // Le reste des constantes
-        const inputOctets = inputIP.split('.').map(Number);
-        const networkOctets = networkAddress.split('.').map(Number);
-        const broadcastOctets = broadcastAddress.split('.').map(Number);
+        const inputIPInt = ipToInt(inputIP);
+        const networkInt = ipToInt(networkAddress);
 
-        const compareIP = (ip1: number[], ip2: number[]): number => {
-            for (let i = 0; i < 4; i++) {
-                if (ip1[i] !== ip2[i]) return ip1[i] - ip2[i];
-            }
-            return 0;
-        };
+        const firstUsableInt = ipToInt(firstUsable);
+        const lastUsableInt = ipToInt(lastUsable);
 
-        const isInUsableRange = compareIP(inputOctets, networkOctets) > 0 &&
-            compareIP(inputOctets, broadcastOctets) < 0;
+        const totalUsableIPs = lastUsableInt - firstUsableInt + 1;
+        const midpointUsableInt = firstUsableInt + Math.floor((totalUsableIPs - 1) / 2);
 
-        if (isInUsableRange) {
-            const isSecondToLast = compareIP(inputOctets, decrementIP(broadcastAddress).split('.').map(Number)) === 0;
-            if (isSecondToLast) {
+        const isInUsableRange = inputIPInt >= firstUsableInt && inputIPInt <= lastUsableInt;
+
+        if (inputIPInt === networkInt) {
+            // L'adresse saisie est l'adresse du réseau, on ne change rien
+        } else if (isInUsableRange) {
+            // L'adresse saisie est une adresse de machine dans la plage utilisable
+            if (inputIPInt <= midpointUsableInt) {
+                // Si l'adresse est dans la première moitié des adresses utilisables
+                firstUsable = inputIP;
+            } else {
+                // Si l'adresse est dans la seconde moitié des adresses utilisables
                 gateway = inputIP;
             }
-
-            const isSecond = compareIP(inputOctets, incrementIP(firstUsable).split('.').map(Number)) === 0;
-            if (isSecond) {
-                firstUsable = inputIP;
-            }
         }
+        // Sinon, si l'adresse n'est pas dans la plage utilisable, on ne change rien
 
-        // On retourne un nouvel objet avec toutes les valeurs
         return {
             ip: ipWithCidr,
             network: networkAddress,
             subnetMask: subnetMask,
+            gateway: gateway,
             firstUsable: firstUsable,
             lastUsable: lastUsable,
-            gateway: gateway,
             broadcast: broadcastAddress,
             site: ''
         };
