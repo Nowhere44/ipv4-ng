@@ -10,11 +10,17 @@ import { Download, RefreshCw, FileDown } from 'lucide-react'
 import { IPResult, GroupedResults } from '@/lib/types'
 import { processIPv4 } from '@/lib/utils'
 import { generateExampleFile, parseFileData } from '@/lib/file-utils'
+import { useRouter } from 'next/navigation'
+import { Network } from 'lucide-react'
+import { VLANStandardization } from '@/components/vlan-standardization';
+import { VLANDocumentation } from '@/components/vlan-documentation';
+
 
 export default function Home() {
   const [results, setResults] = useState<IPResult[]>([])
   const [singleIP, setSingleIP] = useState('')
   const [error, setError] = useState('')
+  const router = useRouter()
 
   const handleSingleIPSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -123,16 +129,27 @@ export default function Home() {
   return (
     <div className="min-h-screen p-4 md:p-8 bg-gray-50">
       <div className="max-w-7xl mx-auto space-y-8">
-        <div>
-          <h1 className="text-4xl font-bold text-gray-900">Calculateur IP</h1>
-          <p className="text-gray-500 mt-2">Analysez vos adresses IP et sous-réseaux</p>
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-4xl font-bold text-gray-900">Calculateur IP, <span className='text-red-500'>By Omar Almoctar COULIBALY</span></h1>
+            <p className="text-gray-500 mt-2">Analysez vos adresses IP et sous-réseaux</p>
+          </div>
+          <Button
+            onClick={() => router.push('/planner')}
+            className="bg-blue-600 hover:bg-blue-700 text-white"
+            size="lg"
+          >
+            <Network className="w-5 h-5 mr-2" />
+            Planification Réseau
+          </Button>
         </div>
 
         <Card className="p-6">
           <Tabs defaultValue="single" className="space-y-4" onValueChange={handleTabChange}>
-            <TabsList className="grid w-full grid-cols-2">
+            <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="single">IP Unique</TabsTrigger>
               <TabsTrigger value="bulk">Import Fichier</TabsTrigger>
+              <TabsTrigger value="vlans">Standardisation VLAN</TabsTrigger>
             </TabsList>
 
             <TabsContent value="single">
@@ -173,6 +190,11 @@ export default function Home() {
                   </div>
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent className='flex flex-col gap-4' value="vlans">
+              <VLANDocumentation />
+              <VLANStandardization />
             </TabsContent>
           </Tabs>
 

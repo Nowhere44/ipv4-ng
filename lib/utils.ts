@@ -50,22 +50,55 @@ export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
             throw new Error('Adresse IP invalide');
         }
 
-        const cidr = parseInt(ipWithCidr.split('/')[1]);
+        // Parse l'IP et le CIDR
+        const [inputIP, cidrStr] = ipWithCidr.split('/');
+        const cidr = parseInt(cidrStr);
         const subnetMask = cidrToSubnetMask(cidr);
 
+        // Calcul des adresses du réseau
         const networkAddress = address.startAddress().address;
         const broadcastAddress = address.endAddress().address;
 
-        const firstUsable = incrementIP(networkAddress);
+        // Variables qui peuvent être modifiées
+        let firstUsable = incrementIP(networkAddress);
         const lastUsable = decrementIP(broadcastAddress);
+        let gateway = lastUsable;
 
+        // Le reste des constantes
+        const inputOctets = inputIP.split('.').map(Number);
+        const networkOctets = networkAddress.split('.').map(Number);
+        const broadcastOctets = broadcastAddress.split('.').map(Number);
+
+        const compareIP = (ip1: number[], ip2: number[]): number => {
+            for (let i = 0; i < 4; i++) {
+                if (ip1[i] !== ip2[i]) return ip1[i] - ip2[i];
+            }
+            return 0;
+        };
+
+        const isInUsableRange = compareIP(inputOctets, networkOctets) > 0 &&
+            compareIP(inputOctets, broadcastOctets) < 0;
+
+        if (isInUsableRange) {
+            const isSecondToLast = compareIP(inputOctets, decrementIP(broadcastAddress).split('.').map(Number)) === 0;
+            if (isSecondToLast) {
+                gateway = inputIP;
+            }
+
+            const isSecond = compareIP(inputOctets, incrementIP(firstUsable).split('.').map(Number)) === 0;
+            if (isSecond) {
+                firstUsable = inputIP;
+            }
+        }
+
+        // On retourne un nouvel objet avec toutes les valeurs
         return {
             ip: ipWithCidr,
             network: networkAddress,
             subnetMask: subnetMask,
             firstUsable: firstUsable,
             lastUsable: lastUsable,
-            gateway: lastUsable,
+            gateway: gateway,
             broadcast: broadcastAddress,
             site: ''
         };
