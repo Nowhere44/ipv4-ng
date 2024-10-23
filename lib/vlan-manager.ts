@@ -1,5 +1,6 @@
-import { DeviceForVLAN, StandardVLAN, VLANMigrationResult, DeviceType } from './vlan-types';
+import { DeviceForVLAN, StandardVLAN, VLANMigrationResult, DeviceType, SubnetReorganization, NetworkTransition } from './vlan-types';
 import { STANDARD_VLANS } from './vlan-constants';
+
 
 interface NetworkInfo {
     network: string;
@@ -11,25 +12,23 @@ interface NetworkInfo {
     zones: string[];
 }
 
-interface SubnetAnalysis {
-    originalSubnet: string;
-    suggestedSubnets: {
-        network: string;
-        vlan: number;
-        deviceCount: number;
-        deviceTypes: string[];
-    }[];
-}
 
-interface SubnetReorganization {
-    originalSubnet: string;    // Sous-réseau actuel
-    newSubnet: string;        // Nouveau sous-réseau suggéré
-    deviceCount: number;      // Nombre d'appareils
-    vlan: number;            // VLAN suggéré
-    devices: DeviceForVLAN[]; // Appareils concernés
-}
 
 export class VLANManager {
+    private devices: DeviceForVLAN[] = [];
+
+    // Méthodes de gestion des appareils
+    addDevice(device: DeviceForVLAN) {
+        this.devices.push(device);
+    }
+
+    setDevices(devices: DeviceForVLAN[]) {
+        this.devices = devices;
+    }
+
+    clearDevices() {
+        this.devices = [];
+    }
 
     // Analyse des sous-réseaux
     analyzeNetworks(): NetworkInfo[] {
@@ -64,31 +63,7 @@ export class VLANManager {
     }
 
     // Suggestion de réorganisation des sous-réseaux
-    suggestNetworkReorganization(): SubnetAnalysis[] {
-        const networks = this.analyzeNetworks();
-        return networks.map(network => {
-            const devices = this.devices.filter(d => d.network === network.network);
 
-            // Regrouper par type d'appareil
-            const deviceGroups = this.groupDevicesByType(devices);
-
-            // Suggérer des sous-réseaux pour chaque groupe
-            const suggestedSubnets = deviceGroups.map(group => {
-                const vlan = this.determineBestVLANForNetwork([group.type], group.zones);
-                return {
-                    network: this.suggestSubnet(group.devices.length),
-                    vlan: vlan.id,
-                    deviceCount: group.devices.length,
-                    deviceTypes: [group.type]
-                };
-            });
-
-            return {
-                originalSubnet: network.network,
-                suggestedSubnets
-            };
-        });
-    }
 
     private calculateSubnet(network: string): string {
         // Extraire le masque du réseau (ex: "192.168.1.0/24" -> "24")
@@ -105,9 +80,9 @@ export class VLANManager {
 
         devices.forEach(device => {
             const type = device.type.toLowerCase();
-            const devices = groups.get(type) || [];
-            devices.push(device);
-            groups.set(type, devices);
+            const groupDevices = groups.get(type) || [];
+            groupDevices.push(device);
+            groups.set(type, groupDevices);
         });
 
         return Array.from(groups.entries()).map(([type, devices]) => ({
@@ -115,15 +90,6 @@ export class VLANManager {
             devices,
             zones: [...new Set(devices.map(d => d.zone || 'Unknown'))]
         }));
-    }
-
-    private suggestSubnet(deviceCount: number): string {
-        // Calculer la taille du sous-réseau nécessaire
-        const hostBits = Math.ceil(Math.log2(deviceCount + 2)); // +2 pour réseau et broadcast
-        const mask = 32 - hostBits;
-
-        // Pour l'exemple, on utilise une plage d'adresses fictive
-        return `10.0.0.0/${mask}`;
     }
 
     private determineBestVLANForNetwork(types: string[], zones: string[]): StandardVLAN {
@@ -138,22 +104,6 @@ export class VLANManager {
         // Si mélange de types
         const hasNonParis = zones.some(zone => zone.toLowerCase() !== 'paris');
         return STANDARD_VLANS.find(v => v.id === (hasNonParis ? 3 : 2))!;
-    }
-
-
-    private devices: DeviceForVLAN[] = [];
-
-    // Méthodes de gestion des appareils
-    addDevice(device: DeviceForVLAN) {
-        this.devices.push(device);
-    }
-
-    setDevices(devices: DeviceForVLAN[]) {
-        this.devices = devices;
-    }
-
-    clearDevices() {
-        this.devices = [];
     }
 
     // Détermine le VLAN approprié pour un appareil
@@ -318,21 +268,79 @@ export class VLANManager {
     // Export du plan de migration
     exportMigrationPlan(): string[][] {
         const migrationPlan = this.generateMigrationPlan();
-        return [
+        const reorganization = this.reorganizeSubnets();
+
+        // Préparer les données d'export
+        const exportData: string[][] = [
             // En-têtes
-            ['Nom', 'Type', 'Zone', 'VLAN Actuel', 'VLAN Suggéré', 'Nom du VLAN', 'Description', 'Conflit'],
-            // Données
-            ...migrationPlan.map(({ device, suggestedVlan, hasConflict }) => [
-                device.name || '',
-                device.type || '',
-                device.zone || 'N/A',
-                (device.currentVlan || 'N/A').toString(),
-                suggestedVlan.id.toString(),
-                suggestedVlan.name,
-                suggestedVlan.description,
-                hasConflict ? 'Oui' : 'Non'
-            ])
+            [
+                'Nom',
+                'Type',
+                'Zone',
+                'VLAN Actuel',
+                'VLAN Suggéré',
+                'Nom du VLAN',
+                'Description VLAN',
+                'Réseau Actuel',
+                'Nouveau Réseau',
+                'Capacité Totale',
+                'Capacité Utilisée',
+                'Capacité Disponible',
+                'Raison du Changement',
+                'Conflit'
+            ]
         ];
+
+        // Combiner les données de migration et de réorganisation pour chaque appareil
+        migrationPlan.forEach(({ device, suggestedVlan, hasConflict }) => {
+            // Trouver les infos de réorganisation correspondantes
+            const reorgInfo = reorganization.find(
+                reorg => reorg.devices.some(d => d.id === device.id)
+            );
+
+            const row: string[] = [
+                device.name || 'N/A',                                          // Nom
+                device.type || 'N/A',                                         // Type
+                device.zone || 'N/A',                                         // Zone
+                device.currentVlan?.toString() || 'N/A',                      // VLAN Actuel
+                suggestedVlan.id.toString(),                                  // VLAN Suggéré
+                suggestedVlan.name || 'N/A',                                  // Nom du VLAN
+                suggestedVlan.description || 'N/A',                           // Description VLAN
+                device.network || 'N/A',                                      // Réseau Actuel
+                reorgInfo?.newSubnet || 'N/A',                               // Nouveau Réseau
+                (reorgInfo?.capacityInfo?.total || 0).toString(),            // Capacité Totale
+                (reorgInfo?.capacityInfo?.used || 0).toString(),             // Capacité Utilisée
+                (reorgInfo?.capacityInfo?.available || 0).toString(),        // Capacité Disponible
+                reorgInfo?.reason || 'Pas de changement nécessaire',         // Raison du Changement
+                hasConflict ? 'Oui' : 'Non'                                  // Conflit
+            ];
+
+            exportData.push(row);
+        });
+
+        // Ajouter une ligne récapitulative pour chaque sous-réseau
+        reorganization.forEach(reorg => {
+            const summaryRow: string[] = [
+                'RÉSUMÉ RÉSEAU',                                             // Nom
+                'N/A',                                                       // Type
+                'N/A',                                                       // Zone
+                'N/A',                                                       // VLAN Actuel
+                reorg.vlan.toString(),                                      // VLAN Suggéré
+                STANDARD_VLANS.find(v => v.id === reorg.vlan)?.name || 'N/A', // Nom du VLAN
+                'Résumé du sous-réseau',                                    // Description VLAN
+                reorg.originalSubnet || 'N/A',                              // Réseau Actuel
+                reorg.newSubnet || 'N/A',                                   // Nouveau Réseau
+                (reorg.capacityInfo?.total || 0).toString(),               // Capacité Totale
+                (reorg.capacityInfo?.used || 0).toString(),                // Capacité Utilisée
+                (reorg.capacityInfo?.available || 0).toString(),           // Capacité Disponible
+                reorg.reason || 'N/A',                                     // Raison du Changement
+                'N/A'                                                      // Conflit
+            ];
+
+            exportData.push(summaryRow);
+        });
+
+        return exportData;
     }
 
     // Statistiques sur la migration
@@ -360,93 +368,204 @@ export class VLANManager {
         return stats;
     }
 
-    private isValidDeviceType(type: string): type is DeviceType {
-        const validTypes: DeviceType[] = [
-            'pc', 'printer', 'workstation', 'wifi', 'wireless',
-            'phone', 'voip', 'camera', 'surveillance', 'server',
-            'iot', 'sensor', 'switch', 'admin'
-        ];
-        return validTypes.includes(type as DeviceType);
-    }
-    // Dans vlan-manager.ts
-    // Dans reorganizeSubnets(), modifions la façon dont nous calculons le nouveau sous-réseau
     reorganizeSubnets(): SubnetReorganization[] {
         const networkGroups = new Map<string, DeviceForVLAN[]>();
+        const existingSubnets: string[] = [];  // Pour tracker tous les sous-réseaux
 
-        // Grouper par réseau actuel
+        // Grouper les appareils par réseau
         this.devices.forEach(device => {
             if (device.network) {
                 const devices = networkGroups.get(device.network) || [];
                 devices.push(device);
                 networkGroups.set(device.network, devices);
+                existingSubnets.push(device.network);
             }
         });
 
-        // Obtenir la base du premier réseau pour le remaniement
-        const baseNetwork = this.devices[0]?.network?.split('/')[0] || '192.168.0.0';
-        const baseOctets = baseNetwork.split('.').map(Number);
-        const baseFirst3Octets = baseOctets.slice(0, 3).join('.');
-        let nextSubnet = 0;
-
-        // Traiter les réseaux du plus grand au plus petit
-        const sortedNetworks = Array.from(networkGroups.entries())
-            .sort((a, b) => b[1].length - a[1].length);
-
         const reorganizations: SubnetReorganization[] = [];
+        const usedNetworks = new Set<string>();
 
-        sortedNetworks.forEach(([originalNetwork, devices]) => {
+        for (const [originalNetwork, devices] of networkGroups.entries()) {
             const devicesCount = devices.length;
-            // Calculer le masque approprié basé sur le nombre d'appareils
-            const newMask = this.calculateRequiredMask(devicesCount);
+            const suggestedBase = this.suggestBaseNetwork(devicesCount, originalNetwork);
+            const requiredMask = this.calculateRequiredMask(devicesCount);
+            const transition = this.validateNetworkTransition(
+                originalNetwork,
+                suggestedBase,
+                devicesCount
+            );
 
-            // Créer le nouveau sous-réseau en utilisant la même base
-            const newNetwork = `${baseFirst3Octets}.${nextSubnet}/${newMask}`;
+            let newSubnet = '';
+            let reason = '';
+            const [baseNetwork] = originalNetwork.split('/');
 
-            // Calculer l'incrément pour le prochain sous-réseau
-            const increment = Math.pow(2, 32 - newMask);
-            nextSubnet += increment;
+            if (transition) {
+                newSubnet = `${suggestedBase}/${requiredMask}`;
+                reason = transition.reason;
+            } else {
+                newSubnet = `${baseNetwork}/${requiredMask}`;
+                reason = "Conservation du réseau existant avec optimisation du masque";
+            }
 
-            // Déterminer le VLAN basé sur le premier appareil
-            const dominantType = devices[0].type as DeviceType;
-            const vlan = this.determineAppropriateVLAN({
-                type: dominantType,
-                id: '0',
-                name: '',
-                zone: devices[0].zone
-            }).id;
+            // Vérifier et ajuster le sous-réseau jusqu'à trouver un qui ne chevauche pas
+            let attempts = 0;
+            const maxAttempts = 256; // Éviter une boucle infinie
+
+            while (
+                (usedNetworks.has(newSubnet) ||
+                    !this.validateSubnetAllocation(newSubnet, Array.from(usedNetworks))) &&
+                attempts < maxAttempts
+            ) {
+                const [network, mask] = newSubnet.split('/');
+                const nextNetwork = this.incrementNetwork(network);
+                newSubnet = `${nextNetwork}/${mask}`;
+                attempts++;
+            }
+
+            if (attempts >= maxAttempts) {
+                throw new Error(`Impossible de trouver un sous-réseau disponible pour ${originalNetwork}`);
+            }
+
+            usedNetworks.add(newSubnet);
+
+            const capacityInfo = {
+                total: Math.pow(2, 32 - requiredMask) - 2,
+                used: devicesCount,
+                available: Math.pow(2, 32 - requiredMask) - 2 - devicesCount
+            };
 
             reorganizations.push({
                 originalSubnet: originalNetwork,
-                newSubnet: newNetwork,
+                newSubnet,
                 deviceCount: devicesCount,
-                vlan,
-                devices
+                vlan: this.determineAppropriateVLAN(devices[0]).id,
+                devices,
+                reason,
+                capacityInfo
             });
-        });
+        }
 
         return reorganizations;
     }
+    private incrementNetwork(network: string): string {
+        const parts = network.split('.').map(Number);
+        for (let i = parts.length - 1; i >= 0; i--) {
+            if (parts[i] < 255) {
+                parts[i]++;
+                break;
+            } else {
+                parts[i] = 0;
+            }
+        }
+        return parts.join('.');
+    }
+    // Fonctions auxiliaires pour la gestion des adresses IP
 
-    private calculateRequiredMask(hostCount: number): number {
-        // Calculer le masque optimal pour le nombre d'hôtes
-        const bitsNeeded = Math.ceil(Math.log2(hostCount + 2)); // +2 pour le réseau et broadcast
-        const mask = Math.min(32 - bitsNeeded, 30); // On limite à /30 minimum
-        return Math.max(mask, 24); // On ne dépasse pas /24
+    private ipToInt(ip: string): number {
+        return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
     }
 
-    // Méthode pour incrémenter l'adresse réseau
-    private incrementNetwork(network: string, mask: number): string {
-        const octets = network.split('.').map(Number);
-        const increment = Math.pow(2, 32 - mask);
-
-        let value = (octets[0] << 24) + (octets[1] << 16) + (octets[2] << 8) + octets[3];
-        value += increment;
-
+    private intToIp(int: number): string {
         return [
-            (value >> 24) & 255,
-            (value >> 16) & 255,
-            (value >> 8) & 255,
-            value & 255
+            (int >>> 24) & 0xFF,
+            (int >>> 16) & 0xFF,
+            (int >>> 8) & 0xFF,
+            int & 0xFF
         ].join('.');
+    }
+
+    private subnetsOverlap(net1: number, mask1: number, net2: number, mask2: number): boolean {
+        const mask = mask1 < mask2 ? mask1 : mask2;
+        const net1Masked = net1 >>> (32 - mask);
+        const net2Masked = net2 >>> (32 - mask);
+        return net1Masked === net2Masked;
+    }
+
+    private calculateRequiredMask(hostCount: number): number {
+        const bitsNeeded = Math.ceil(Math.log2(hostCount + 2));
+        const suggestedMask = 32 - bitsNeeded;
+
+        // Déterminer la plage appropriée selon le nombre d'hôtes
+        if (hostCount > 65534) {
+            if (hostCount > 1048574) {
+                // Plus que ce que peut gérer 172.16.x.x
+                return Math.max(suggestedMask, 8); // Classe A
+            } else {
+                // La plage 172.16.0.0/12 suffit
+                return Math.max(suggestedMask, 12); // Classe B
+            }
+        } else {
+            // Peut rester en 192.168.x.x
+            return Math.max(suggestedMask, 16); // Classe C
+        }
+    }
+
+    private suggestBaseNetwork(hostCount: number, currentNetwork: string): string {
+        const [currentBase] = currentNetwork.split('.');
+
+        if (hostCount > 65534) {
+            if (hostCount > 1048574) {
+                return '10.0.0.0'; // Migration vers classe A
+            }
+            return '172.16.0.0'; // Migration vers classe B
+        }
+
+        // Maintenir la base actuelle si possible
+        return currentBase === '192' ? '192.168.0.0' : currentNetwork;
+    }
+
+    private validateNetworkTransition(currentNetwork: string, newNetwork: string, hostCount: number): NetworkTransition | null {
+        const [currentBase] = currentNetwork.split('.');
+        const [newBase] = newNetwork.split('.');
+
+        const getCurrentClass = (base: string): 'A' | 'B' | 'C' => {
+            const baseNum = parseInt(base);
+            if (baseNum >= 1 && baseNum <= 126) return 'A';
+            if (baseNum >= 128 && baseNum <= 191) return 'B';
+            return 'C';
+        };
+
+        const getMaxHosts = (networkClass: 'A' | 'B' | 'C'): number => {
+            switch (networkClass) {
+                case 'A': return 16777214;
+                case 'B': return 1048574;
+                case 'C': return 65534;
+            }
+        };
+
+        const currentClass = getCurrentClass(currentBase);
+        const suggestedClass = getCurrentClass(newBase);
+        const maxHosts = getMaxHosts(currentClass);
+
+        if (hostCount > maxHosts) {
+            return {
+                currentClass,
+                suggestedClass,
+                reason: `Migration nécessaire: ${hostCount} hôtes dépassent la capacité de classe ${currentClass} (${maxHosts} max)`,
+                requiredHosts: hostCount,
+                maxHosts
+            };
+        }
+
+        return null;
+    }
+
+    private validateSubnetAllocation(newSubnet: string, existingSubnets: string[]): boolean {
+        const [newNetwork, newMask] = newSubnet.split('/');
+        const newNetInt = this.ipToInt(newNetwork);
+        const newMaskNum = parseInt(newMask);
+
+        return !existingSubnets.some(subnet => {
+            const [existingNetwork, existingMask] = subnet.split('/');
+            const existingNetInt = this.ipToInt(existingNetwork);
+            const existingMaskNum = parseInt(existingMask);
+
+            return this.subnetsOverlap(
+                newNetInt,
+                newMaskNum,
+                existingNetInt,
+                existingMaskNum
+            );
+        });
     }
 }

@@ -4,7 +4,30 @@ export interface DeviceForVLAN {
     type: DeviceType;
     currentVlan?: number;
     zone?: string;
+    site?: string;
     network?: string;  // Ajout de la propriété network
+}
+
+export interface SubnetReorganization {
+    originalSubnet: string;
+    newSubnet: string;
+    deviceCount: number;
+    vlan: number;
+    devices: DeviceForVLAN[];
+    reason?: string;
+    capacityInfo?: {
+        total: number;
+        used: number;
+        available: number;
+    };
+}
+
+export interface NetworkTransition {
+    currentClass: 'A' | 'B' | 'C';
+    suggestedClass: 'A' | 'B' | 'C';
+    reason: string;
+    requiredHosts: number;
+    maxHosts: number;
 }
 
 // Assurons-nous que DeviceType inclut tous les types possibles
