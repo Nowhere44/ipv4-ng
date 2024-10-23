@@ -17,6 +17,32 @@ function cidrToSubnetMask(cidr: number): string {
     return mask.join('.');
 }
 
+function incrementIP(ip: string): string {
+    const octets = ip.split('.').map(Number);
+    for (let i = octets.length - 1; i >= 0; i--) {
+        if (octets[i] < 255) {
+            octets[i]++;
+            break;
+        } else {
+            octets[i] = 0;
+        }
+    }
+    return octets.join('.');
+}
+
+function decrementIP(ip: string): string {
+    const octets = ip.split('.').map(Number);
+    for (let i = octets.length - 1; i >= 0; i--) {
+        if (octets[i] > 0) {
+            octets[i]--;
+            break;
+        } else {
+            octets[i] = 255;
+        }
+    }
+    return octets.join('.');
+}
+
 export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
     try {
         const address = new Address4(ipWithCidr);
@@ -27,16 +53,20 @@ export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
         const cidr = parseInt(ipWithCidr.split('/')[1]);
         const subnetMask = cidrToSubnetMask(cidr);
 
-        const lastUsable = address.endAddress().address;
+        const networkAddress = address.startAddress().address;
+        const broadcastAddress = address.endAddress().address;
+
+        const firstUsable = incrementIP(networkAddress);
+        const lastUsable = decrementIP(broadcastAddress);
 
         return {
             ip: ipWithCidr,
-            network: address.startAddress().address,
+            network: networkAddress,
             subnetMask: subnetMask,
-            firstUsable: address.startAddress().address,
+            firstUsable: firstUsable,
             lastUsable: lastUsable,
             gateway: lastUsable,
-            broadcast: address.endAddress().address,
+            broadcast: broadcastAddress,
             site: ''
         };
     } catch (error) {
