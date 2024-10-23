@@ -24,7 +24,6 @@ export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
             throw new Error('Adresse IP invalide');
         }
 
-        // Extraire le CIDR et convertir en notation décimale
         const cidr = parseInt(ipWithCidr.split('/')[1]);
         const subnetMask = cidrToSubnetMask(cidr);
 
@@ -33,7 +32,7 @@ export async function processIPv4(ipWithCidr: string): Promise<IPResult> {
         return {
             ip: ipWithCidr,
             network: address.startAddress().address,
-            subnetMask: subnetMask, // Maintenant en notation décimale pointée
+            subnetMask: subnetMask,
             firstUsable: address.startAddress().address,
             lastUsable: lastUsable,
             gateway: lastUsable,
