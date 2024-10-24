@@ -15,6 +15,7 @@ import { Network } from 'lucide-react'
 import { VLANStandardization } from '@/components/vlan-standardization';
 import { VLANDocumentation } from '@/components/vlan-documentation';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from '@/components/ui/dropdown-menu';
+import SubnetSplitter from '@/components/subnet-splitter';
 
 
 export default function Home() {
@@ -192,10 +193,11 @@ export default function Home() {
 
         <Card className="p-6">
           <Tabs defaultValue="single" className="space-y-4" onValueChange={handleTabChange}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="single">IP Unique</TabsTrigger>
               <TabsTrigger value="bulk">Import Fichier</TabsTrigger>
               <TabsTrigger value="vlans">Standardisation VLAN <span className='text-gray-600 font-bold'> {" "} / KEM ONE</span></TabsTrigger>
+              <TabsTrigger value="split">Découpage Auto</TabsTrigger>
             </TabsList>
 
             <TabsContent value="single">
@@ -256,6 +258,10 @@ export default function Home() {
             <TabsContent className='flex flex-col gap-4' value="vlans">
               <VLANDocumentation />
               <VLANStandardization />
+            </TabsContent>
+
+            <TabsContent value="split">
+              <SubnetSplitter />
             </TabsContent>
           </Tabs>
 
